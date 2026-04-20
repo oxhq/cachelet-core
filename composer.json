@@ -1,0 +1,50 @@
+{
+  "name": "oxhq/cachelet-core",
+  "description": "Core cache orchestration runtime for the Cachelet package family.",
+  "type": "library",
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "OxHQ",
+      "homepage": "https://github.com/oxhq"
+    }
+  ],
+  "require": {
+    "php": "^8.2",
+    "illuminate/cache": "^12.0|^13.0",
+    "illuminate/support": "^12.0|^13.0"
+  },
+  "autoload": {
+    "psr-4": {
+      "Oxhq\\Cachelet\\": "src/"
+    }
+  },
+  "extra": {
+    "branch-alias": {
+      "dev-main": "0.1.x-dev"
+    },
+    "laravel": {
+      "providers": [
+        "Oxhq\\Cachelet\\CacheletServiceProvider"
+      ],
+      "aliases": {
+        "Cachelet": "Oxhq\\Cachelet\\Facades\\Cachelet"
+      }
+    }
+  },
+  "minimum-stability": "stable",
+  "prefer-stable": true,
+  "homepage": "https://github.com/oxhq/cachelet",
+  "keywords": [
+    "laravel",
+    "cache",
+    "swr",
+    "invalidation",
+    "cache-keys",
+    "observability"
+  ],
+  "support": {
+    "issues": "https://github.com/oxhq/cachelet/issues",
+    "source": "https://github.com/oxhq/cachelet/tree/main/packages/cachelet-core"
+  }
+}
