@@ -14,6 +14,7 @@ use Oxhq\Cachelet\Events\CacheletHit;
 use Oxhq\Cachelet\Events\CacheletInvalidated;
 use Oxhq\Cachelet\Events\CacheletMiss;
 use Oxhq\Cachelet\Events\CacheletStored;
+use Oxhq\Cachelet\Support\CacheTelemetryEmitter;
 use Oxhq\Cachelet\Support\CoordinateLogger;
 use stdClass;
 
@@ -24,18 +25,27 @@ trait BuildsCache
         $entry = $this->getStoredEntry();
 
         if ($entry !== $this->missingValueSentinel()) {
-            $this->dispatchCacheEvent('hit', $this->key(), $entry['value']);
+            $this->dispatchCacheEvent('hit', $this->key(), $entry['value'], [
+                'access_strategy' => 'standard',
+                'entry_state' => 'fresh',
+            ]);
 
             return $entry['value'];
         }
 
-        $this->dispatchCacheEvent('miss', $this->key());
+        $this->dispatchCacheEvent('miss', $this->key(), null, [
+            'access_strategy' => 'standard',
+            'entry_state' => 'missing',
+        ]);
 
         if ($callback === null) {
             return null;
         }
 
-        return $this->computeAndStoreWithLock($callback);
+        return $this->computeAndStoreWithLock($callback, false, [
+            'access_strategy' => 'standard',
+            'entry_state' => 'missing',
+        ]);
     }
 
     public function staleWhileRevalidate(Closure $callback, ?Closure $fallback = null): mixed
@@ -43,16 +53,23 @@ trait BuildsCache
         $entry = $this->getStoredEntry();
 
         if ($entry !== $this->missingValueSentinel()) {
-            $this->dispatchCacheEvent('hit', $this->key(), $entry['value']);
+            $entryState = $this->isStale($entry) ? 'stale' : 'fresh';
+            $this->dispatchCacheEvent('hit', $this->key(), $entry['value'], [
+                'access_strategy' => 'stale_while_revalidate',
+                'entry_state' => $entryState,
+            ]);
 
-            if ($this->isStale($entry)) {
+            if ($entryState === 'stale') {
                 $this->backgroundRefresh($callback);
             }
 
             return $entry['value'];
         }
 
-        $this->dispatchCacheEvent('miss', $this->key());
+        $this->dispatchCacheEvent('miss', $this->key(), null, [
+            'access_strategy' => 'stale_while_revalidate',
+            'entry_state' => 'missing',
+        ]);
 
         if ($fallback !== null) {
             $this->backgroundRefresh($callback);
@@ -60,7 +77,10 @@ trait BuildsCache
             return value($fallback);
         }
 
-        return $this->computeAndStoreWithLock($callback, stale: true);
+        return $this->computeAndStoreWithLock($callback, stale: true, context: [
+            'access_strategy' => 'stale_while_revalidate',
+            'entry_state' => 'missing',
+        ]);
     }
 
     protected function backgroundRefresh(Closure $callback): void
@@ -74,7 +94,11 @@ trait BuildsCache
 
         $refresh = function () use ($callback, $lockKey): void {
             try {
-                $this->computeAndStoreWithLock($callback, stale: true);
+                $this->computeAndStoreWithLock($callback, stale: true, context: [
+                    'access_strategy' => 'stale_while_revalidate',
+                    'background' => true,
+                    'entry_state' => 'stale',
+                ]);
             } finally {
                 Cache::forget($lockKey);
             }
@@ -88,16 +112,16 @@ trait BuildsCache
         };
     }
 
-    protected function computeAndStoreWithLock(Closure $callback, bool $stale = false): mixed
+    protected function computeAndStoreWithLock(Closure $callback, bool $stale = false, array $context = []): mixed
     {
         $lock = $this->computationLock();
 
         if ($lock === null) {
-            return $this->computeAndStore($callback, $stale);
+            return $this->computeAndStore($callback, $stale, $context);
         }
 
         try {
-            return $lock->block($this->fillLockWaitSeconds(), function () use ($callback, $stale): mixed {
+            return $lock->block($this->fillLockWaitSeconds(), function () use ($callback, $stale, $context): mixed {
                 $current = $this->getStoredEntry();
 
                 if (
@@ -107,7 +131,7 @@ trait BuildsCache
                     return $current['value'];
                 }
 
-                return $this->computeAndStore($callback, $stale);
+                return $this->computeAndStore($callback, $stale, $context);
             });
         } catch (LockTimeoutException) {
             $current = $this->getStoredEntry();
@@ -116,19 +140,22 @@ trait BuildsCache
                 return $current['value'];
             }
 
-            return $this->computeAndStore($callback, $stale);
+            return $this->computeAndStore($callback, $stale, $context);
         } catch (\Throwable) {
-            return $this->computeAndStore($callback, $stale);
+            return $this->computeAndStore($callback, $stale, $context);
         }
     }
 
-    protected function computeAndStore(Closure $callback, bool $stale = false): mixed
+    protected function computeAndStore(Closure $callback, bool $stale = false, array $context = []): mixed
     {
         $value = value($callback);
 
         $this->putStoredValue($value, $stale);
         $this->coordinateLogger()->record($this->coordinate());
-        $this->dispatchCacheEvent('stored', $this->key(), $value);
+        $this->dispatchCacheEvent('stored', $this->key(), $value, array_merge($context, [
+            'value_type' => get_debug_type($value),
+            'stale_window' => $stale,
+        ]));
 
         return $value;
     }
@@ -210,7 +237,7 @@ trait BuildsCache
 
     protected function resolveStore(): Repository|TaggedCache
     {
-        $store = Cache::store();
+        $store = $this->resolveRepository();
 
         if ($this->tags === [] || ! $this->supportsTags($store)) {
             return $store;
@@ -219,12 +246,40 @@ trait BuildsCache
         return $store->tags($this->tags);
     }
 
+    protected function resolveRepository(): Repository
+    {
+        return Cache::store();
+    }
+
+    protected function resolvedStoreName(): string
+    {
+        $repository = $this->resolveRepository();
+        $stores = array_keys(config('cache.stores', []));
+
+        foreach ($stores as $name) {
+            try {
+                $candidate = Cache::store($name);
+            } catch (\Throwable) {
+                continue;
+            }
+
+            if (
+                $candidate === $repository
+                || $candidate->getStore() === $repository->getStore()
+            ) {
+                return (string) $name;
+            }
+        }
+
+        return (string) (config('cache.default') ?? Cache::getDefaultDriver());
+    }
+
     protected function supportsTags(Repository $store): bool
     {
         return $store->getStore() instanceof TaggableStore;
     }
 
-    protected function dispatchCacheEvent(string $type, string $key, mixed $value = null): void
+    protected function dispatchCacheEvent(string $type, string $key, mixed $value = null, array $context = []): void
     {
         if (! ($this->config['observability']['events']['enabled'] ?? false)) {
             return;
@@ -238,6 +293,7 @@ trait BuildsCache
         };
 
         event($event);
+        $this->telemetryEmitter()->emit($type, $this->coordinate(), $this->withSwrRuntime($context));
     }
 
     protected function dispatchInvalidatedEvent(array $keys, string $reason = 'manual'): void
@@ -246,7 +302,35 @@ trait BuildsCache
             return;
         }
 
-        event($this->makeInvalidatedEvent($keys, $reason));
+        $event = $this->makeInvalidatedEvent($keys, $reason);
+
+        event($event);
+        $this->telemetryEmitter()->emit('invalidated', $this->coordinate(), array_filter([
+            'reason' => $reason,
+            'keys' => array_values($keys),
+            'model_class' => $event->modelClass,
+            'model_key' => $event->modelKey,
+        ], static fn (mixed $value): bool => $value !== null));
+    }
+
+    protected function withSwrRuntime(array $context): array
+    {
+        if (! array_key_exists('access_strategy', $context)) {
+            return $context;
+        }
+
+        $entryState = (string) ($context['entry_state'] ?? 'missing');
+        $requested = ($context['access_strategy'] ?? 'standard') === 'stale_while_revalidate';
+        $backgroundRefresh = (bool) ($context['background'] ?? false);
+
+        $context['swr_runtime'] = [
+            'requested' => $requested,
+            'background_refresh' => $backgroundRefresh,
+            'served_stale' => $requested && $entryState === 'stale' && ! $backgroundRefresh,
+            'entry_state' => $entryState,
+        ];
+
+        return $context;
     }
 
     protected function makeInvalidatedEvent(array $keys, string $reason): CacheletInvalidated
@@ -261,6 +345,11 @@ trait BuildsCache
     protected function coordinateLogger(): CoordinateLogger
     {
         return app(CoordinateLogger::class);
+    }
+
+    protected function telemetryEmitter(): CacheTelemetryEmitter
+    {
+        return app(CacheTelemetryEmitter::class);
     }
 
     protected function dispatchQueuedRefresh(Closure $refresh): void

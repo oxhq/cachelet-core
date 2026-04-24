@@ -17,6 +17,7 @@ composer require oxhq/cachelet-core
 - Exact-key and prefix invalidation
 - Registry inspection commands
 - Typed cache lifecycle events
+- Canonical `cachelet.coordinate.v1` and `cachelet.telemetry.v1` projections
 
 ## Example
 

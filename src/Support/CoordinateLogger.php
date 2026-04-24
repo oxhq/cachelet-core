@@ -7,6 +7,7 @@ use Illuminate\Cache\TaggableStore;
 use Illuminate\Contracts\Cache\Repository;
 use Illuminate\Support\Facades\Cache;
 use Oxhq\Cachelet\ValueObjects\CacheCoordinate;
+use Oxhq\Cachelet\ValueObjects\CacheScope;
 
 class CoordinateLogger
 {
@@ -64,6 +65,42 @@ class CoordinateLogger
         return $this->keysForPrefix($prefix);
     }
 
+    /**
+     * @return array<int, CacheCoordinate>
+     */
+    public function coordinatesForScope(CacheScope|string $scope): array
+    {
+        $identifier = $scope instanceof CacheScope ? $scope->identifier : (string) $scope;
+        $coordinates = [];
+
+        foreach ($this->knownPrefixes() as $prefix) {
+            foreach ($this->coordinatesForPrefix($prefix) as $coordinate) {
+                if ($coordinate->scope?->identifier !== $identifier) {
+                    continue;
+                }
+
+                $coordinates[] = $coordinate;
+            }
+        }
+
+        return $coordinates;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    public function forgetScope(CacheScope|string $scope): array
+    {
+        $deleted = [];
+
+        foreach ($this->coordinatesForScope($scope) as $coordinate) {
+            $this->forget($coordinate);
+            $deleted[] = $coordinate->toProjection();
+        }
+
+        return $deleted;
+    }
+
     protected function keysForPrefix(string $prefix): array
     {
         $keys = Cache::get($this->registryKey($prefix), []);
@@ -73,6 +110,20 @@ class CoordinateLogger
         }
 
         return array_values(array_unique(array_filter($keys, 'is_string')));
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    protected function knownPrefixes(): array
+    {
+        $prefixes = Cache::get('cachelet:registry:prefixes', []);
+
+        if (! is_array($prefixes)) {
+            return [];
+        }
+
+        return array_values(array_unique(array_filter($prefixes, 'is_string')));
     }
 
     protected function coordinatesForPrefix(string $prefix): array
@@ -95,6 +146,7 @@ class CoordinateLogger
     protected function storeMetadata(CacheCoordinate $coordinate): void
     {
         $payload = $coordinate->toArray();
+        $this->rememberPrefix($coordinate->prefix);
 
         if ($coordinate->ttl === null) {
             Cache::forever($this->metadataKey($coordinate->key), $payload);
@@ -107,7 +159,7 @@ class CoordinateLogger
 
     protected function forgetStoredValue(CacheCoordinate $coordinate): void
     {
-        $store = Cache::store();
+        $store = $this->repositoryForCoordinate($coordinate);
 
         if ($coordinate->tags !== [] && $this->supportsTags($store)) {
             $store->tags($coordinate->tags)->forget($coordinate->key);
@@ -115,7 +167,7 @@ class CoordinateLogger
             return;
         }
 
-        Cache::forget($coordinate->key);
+        $store->forget($coordinate->key);
     }
 
     protected function supportsTags(Repository $store): bool
@@ -132,6 +184,7 @@ class CoordinateLogger
 
         if ($remaining === []) {
             Cache::forget($this->registryKey($prefix));
+            $this->forgetKnownPrefix($prefix);
 
             return;
         }
@@ -161,5 +214,47 @@ class CoordinateLogger
     protected function metadataKey(string $key): string
     {
         return 'cachelet:meta:'.sha1($key);
+    }
+
+    protected function repositoryForCoordinate(CacheCoordinate $coordinate): Repository
+    {
+        if ($coordinate->store) {
+            try {
+                return Cache::store($coordinate->store);
+            } catch (\Throwable) {
+                // Fall back to the default repository when the recorded store no longer exists.
+            }
+        }
+
+        return Cache::store();
+    }
+
+    protected function rememberPrefix(string $prefix): void
+    {
+        $prefixes = $this->knownPrefixes();
+
+        if (in_array($prefix, $prefixes, true)) {
+            return;
+        }
+
+        $prefixes[] = $prefix;
+
+        Cache::forever('cachelet:registry:prefixes', array_values($prefixes));
+    }
+
+    protected function forgetKnownPrefix(string $prefix): void
+    {
+        $prefixes = array_values(array_filter(
+            $this->knownPrefixes(),
+            static fn (string $knownPrefix): bool => $knownPrefix !== $prefix
+        ));
+
+        if ($prefixes === []) {
+            Cache::forget('cachelet:registry:prefixes');
+
+            return;
+        }
+
+        Cache::forever('cachelet:registry:prefixes', $prefixes);
     }
 }

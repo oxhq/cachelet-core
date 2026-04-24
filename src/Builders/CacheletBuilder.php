@@ -8,6 +8,7 @@ use Oxhq\Cachelet\Concerns\GeneratesKeys;
 use Oxhq\Cachelet\Concerns\HandlesTtl;
 use Oxhq\Cachelet\Contracts\CacheletBuilderInterface;
 use Oxhq\Cachelet\ValueObjects\CacheCoordinate;
+use Oxhq\Cachelet\ValueObjects\CacheScope;
 
 class CacheletBuilder implements CacheletBuilderInterface
 {
@@ -26,6 +27,10 @@ class CacheletBuilder implements CacheletBuilderInterface
     protected array $tags = [];
 
     protected ?string $version = null;
+
+    protected ?CacheScope $scope = null;
+
+    protected string $module = 'core';
 
     protected array $options = [
         'excludeTimestamps' => true,
@@ -56,6 +61,31 @@ class CacheletBuilder implements CacheletBuilderInterface
     {
         $tags = is_string($tags) ? [$tags] : $tags;
         $this->tags = array_values(array_unique(array_merge($this->tags, $tags)));
+
+        return $this;
+    }
+
+    public function asModule(string $module): static
+    {
+        $normalized = trim(strtolower($module));
+
+        if ($normalized !== '') {
+            $this->module = $normalized;
+        }
+
+        return $this;
+    }
+
+    public function scope(CacheScope $scope): static
+    {
+        $this->scope = $scope->asExplicit();
+
+        return $this;
+    }
+
+    public function withInferredScope(CacheScope $scope): static
+    {
+        $this->scope = CacheScope::inferred($scope->identifier);
 
         return $this;
     }
@@ -120,7 +150,53 @@ class CacheletBuilder implements CacheletBuilderInterface
             key: $this->key(),
             ttl: $this->duration(),
             tags: $this->tags,
-            metadata: $this->metadata,
+            metadata: $this->coordinateMetadata(),
+            module: $this->module,
+            version: $this->version,
+            store: $this->storeName(),
+            swr: $this->staleConfiguration(),
+            scope: $this->resolvedScope(),
         );
+    }
+
+    protected function coordinateMetadata(): array
+    {
+        return array_merge($this->metadata, [
+            'module' => $this->module,
+            'type' => $this->module,
+            'scope' => $this->resolvedScope()->identifier,
+            'scope_source' => $this->resolvedScope()->source,
+        ]);
+    }
+
+    protected function resolvedScope(): CacheScope
+    {
+        return $this->scope ?? $this->inferredScope();
+    }
+
+    protected function inferredScope(): CacheScope
+    {
+        return CacheScope::inferred($this->prefix);
+    }
+
+    protected function storeName(): string
+    {
+        return $this->resolvedStoreName();
+    }
+
+    protected function staleConfiguration(): array
+    {
+        $ttl = $this->duration();
+        $graceTtl = max(0, (int) ($this->config['stale']['grace_ttl'] ?? 0));
+
+        return [
+            'capable' => $ttl !== null,
+            'configured' => $ttl !== null && $graceTtl > 0,
+            'refresh' => (string) ($this->config['stale']['refresh'] ?? 'sync'),
+            'grace_ttl' => $graceTtl,
+            'refresh_lock_ttl' => (int) ($this->config['stale']['lock_ttl'] ?? 0),
+            'fill_lock_ttl' => (int) ($this->config['locks']['fill_ttl'] ?? 0),
+            'fill_wait' => (int) ($this->config['locks']['fill_wait'] ?? 0),
+        ];
     }
 }

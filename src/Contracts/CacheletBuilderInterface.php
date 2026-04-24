@@ -5,6 +5,7 @@ namespace Oxhq\Cachelet\Contracts;
 use Closure;
 use DateTimeInterface;
 use Oxhq\Cachelet\ValueObjects\CacheCoordinate;
+use Oxhq\Cachelet\ValueObjects\CacheScope;
 
 interface CacheletBuilderInterface
 {
@@ -15,6 +16,10 @@ interface CacheletBuilderInterface
     public function withTags(string|array $tags): static;
 
     public function withMetadata(array $metadata): static;
+
+    public function scope(CacheScope $scope): static;
+
+    public function withInferredScope(CacheScope $scope): static;
 
     public function versioned(?string $version = null): static;
 
