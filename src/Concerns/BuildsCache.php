@@ -248,11 +248,19 @@ trait BuildsCache
 
     protected function resolveRepository(): Repository
     {
+        if (is_string($this->store) && $this->store !== '') {
+            return Cache::store($this->store);
+        }
+
         return Cache::store();
     }
 
     protected function resolvedStoreName(): string
     {
+        if (is_string($this->store) && $this->store !== '') {
+            return $this->store;
+        }
+
         $repository = $this->resolveRepository();
         $stores = array_keys(config('cache.stores', []));
 

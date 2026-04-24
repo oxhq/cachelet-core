@@ -28,6 +28,8 @@ class CacheletBuilder implements CacheletBuilderInterface
 
     protected ?string $version = null;
 
+    protected ?string $store = null;
+
     protected ?CacheScope $scope = null;
 
     protected string $module = 'core';
@@ -40,6 +42,7 @@ class CacheletBuilder implements CacheletBuilderInterface
     {
         $this->prefix = $prefix;
         $this->config = $config;
+        $this->store = $config['defaults']['store'] ?? null;
     }
 
     public function from(mixed $payload): static
@@ -72,6 +75,14 @@ class CacheletBuilder implements CacheletBuilderInterface
         if ($normalized !== '') {
             $this->module = $normalized;
         }
+
+        return $this;
+    }
+
+    public function onStore(?string $store): static
+    {
+        $normalized = is_string($store) ? trim($store) : null;
+        $this->store = $normalized !== '' ? $normalized : null;
 
         return $this;
     }

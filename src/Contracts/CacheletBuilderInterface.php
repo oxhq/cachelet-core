@@ -17,6 +17,8 @@ interface CacheletBuilderInterface
 
     public function withMetadata(array $metadata): static;
 
+    public function onStore(?string $store): static;
+
     public function scope(CacheScope $scope): static;
 
     public function withInferredScope(CacheScope $scope): static;

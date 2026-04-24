@@ -15,7 +15,8 @@ composer require oxhq/cachelet-core
 - Deterministic cache keys from normalized payloads
 - TTL and stale-while-revalidate helpers
 - Exact-key and prefix invalidation
-- Registry inspection commands
+- Explicit `onStore(...)` cache-store selection
+- Registry inspection and `cachelet:prune` maintenance commands
 - Typed cache lifecycle events
 - Canonical `cachelet.coordinate.v1` and `cachelet.telemetry.v1` projections
 
@@ -26,6 +27,7 @@ use Oxhq\Cachelet\Facades\Cachelet;
 
 $value = Cachelet::for('users.index')
     ->from(['page' => 1])
+    ->onStore('redis')
     ->ttl(300)
     ->remember(fn () => User::paginate());
 ```

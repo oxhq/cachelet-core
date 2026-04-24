@@ -4,6 +4,7 @@ return [
     'defaults' => [
         'ttl' => 3600,
         'prefix' => 'cachelet',
+        'store' => null,
     ],
     'observability' => [
         'events' => [
@@ -23,6 +24,19 @@ return [
         'fill_suffix' => ':fill',
         'fill_ttl' => 30,
         'fill_wait' => 5,
+    ],
+    'registry' => [
+        'store' => null,
+        'prefix' => 'cachelet:registry',
+        'metadata_ttl' => null,
+        'lock_ttl' => 10,
+        'lock_wait' => 5,
+    ],
+    'telemetry' => [
+        'store' => null,
+        'prefix' => 'cachelet:telemetry',
+        'per_scope_limit' => 100,
+        'retention' => 86400,
     ],
     'serialization' => [
         'exclude_dates' => true,
