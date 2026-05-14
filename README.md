@@ -1,8 +1,8 @@
 # cachelet-core
 
-Read-only split of the Cachelet monorepo package at `packages/cachelet-core`.
+Generic cache operations runtime for Laravel.
 
-Core cache orchestration runtime for Laravel.
+`cachelet-core` is the foundation of the Cachelet family: deterministic keys, TTL/SWR behavior, inspection, invalidation, telemetry, and sidecar maintenance without model, query, or request-specific integrations.
 
 ## Install
 
@@ -10,24 +10,31 @@ Core cache orchestration runtime for Laravel.
 composer require oxhq/cachelet-core
 ```
 
-## Features
+## Best Fit
 
-- Deterministic cache keys from normalized payloads
-- TTL and stale-while-revalidate helpers
-- Exact-key and prefix invalidation
-- Explicit `onStore(...)` cache-store selection
-- Registry inspection and `cachelet:prune` maintenance commands
-- Typed cache lifecycle events
-- Canonical `cachelet.coordinate.v1` and `cachelet.telemetry.v1` projections
+Use this package when the app already has its own caching layer and you want the Cachelet operating model around it:
+
+- stable coordinates
+- normalized payload keys
+- exact-key and prefix invalidation
+- `onStore(...)` routing
+- telemetry and intervention contracts
+- `cachelet:list`, `cachelet:inspect`, `cachelet:flush`, and `cachelet:prune`
 
 ## Example
 
 ```php
 use Oxhq\Cachelet\Facades\Cachelet;
 
-$value = Cachelet::for('users.index')
-    ->from(['page' => 1])
+$report = Cachelet::for('reports.sales')
+    ->from(['from' => '2026-01-01', 'to' => '2026-01-31'])
     ->onStore('redis')
-    ->ttl(300)
-    ->remember(fn () => User::paginate());
+    ->ttl('+30 minutes')
+    ->remember(fn () => $service->salesReport());
 ```
+
+## Docs
+
+- [`../../docs/operations.md`](../../docs/operations.md)
+- [`../../docs/operator-questions.md`](../../docs/operator-questions.md)
+- [`../../docs/install-matrix.md`](../../docs/install-matrix.md)
