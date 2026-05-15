@@ -61,7 +61,7 @@ trait HandlesTtl
             throw new InvalidArgumentException("TTL must be positive, got {$seconds}");
         }
 
-        return (int) $seconds;
+        return $seconds;
     }
 
     protected function secondsUntil(\DateTimeInterface $ttl): int
@@ -72,7 +72,7 @@ trait HandlesTtl
             throw new InvalidArgumentException('TTL date must be in the future.');
         }
 
-        return (int) $seconds;
+        return (int) ceil($seconds);
     }
 
     protected function parseStringTtl(string $ttl): int

@@ -222,7 +222,7 @@ trait BuildsCache
 
         return max(
             1,
-            Carbon::now()->diffInSeconds(Carbon::parse($entry['stale_until']), false)
+            (int) ceil(Carbon::now()->diffInSeconds(Carbon::parse($entry['stale_until']), false))
         );
     }
 
